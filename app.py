@@ -1,9 +1,13 @@
 import streamlit as st
 import csv
 import random
+import os # ファイル操作のためにosをインポート
 
 # --- 定数 ---
 QUESTIONS_FILE = 'questions.csv'
+# CSVのヘッダーを定数として定義
+CSV_HEADERS = ["問題No", "難易度", "問題", "選択肢1", "選択肢2", "選択肢3", "選択肢4", "正解", "コメント"]
+
 
 # --- セッション状態の初期化 ---
 # アプリが初めてロードされたとき、またはブラウザのキャッシュがクリアされたときにのみ実行
@@ -35,19 +39,39 @@ def load_questions_from_csv(filename):
     問題データの検証も行う。
     """
     questions = []
+    # ファイルが存在しない場合、ヘッダーのみのファイルを作成する
+    if not os.path.exists(filename):
+        try:
+            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(CSV_HEADERS)
+            st.info(f"'{filename}'が見つからなかったため、新しく作成しました。サイドバーから問題を追加してください。")
+            return []
+        except Exception as e:
+            st.error(f"'{filename}'の作成中にエラーが発生しました: {e}")
+            return []
+    
     try:
         with open(filename, 'r', newline='', encoding='utf-8') as csvfile:
             reader = csv.DictReader(csvfile)
-            required_headers = ["問題No", "難易度", "問題", "選択肢1", "選択肢2", "選択肢3", "選択肢4", "正解"]
-            if not all(header in reader.fieldnames for header in required_headers):
-                st.error("CSVファイルのヘッダーが不足しています。以下のヘッダーが必要です: " + ", ".join(required_headers))
+            
+            # ヘッダーの検証
+            if not all(header in reader.fieldnames for header in CSV_HEADERS):
+                st.error("CSVファイルのヘッダーが正しくありません。必要なヘッダー: " + ", ".join(CSV_HEADERS))
                 return []
 
             for row_num, row in enumerate(reader, 2): # 2行目からカウント開始
                 try:
+                    # 空の行をスキップ
+                    if not any(row.values()):
+                        continue
+
                     choices = [row[f'選択肢{i}'] for i in range(1, 5) if row.get(f'選択肢{i}')]
                     
-                    # 正解インデックスの検証
+                    if len(choices) < 4:
+                         st.warning(f"問題No.{row.get('問題No', '不明')} (CSVの{row_num}行目): 選択肢が4つ未満です。この問題をスキップします。")
+                         continue
+                         
                     correct_idx_str = row.get('正解')
                     if not correct_idx_str:
                         st.warning(f"問題No.{row.get('問題No', '不明')} (CSVの{row_num}行目): '正解'が空欄です。この問題をスキップします。")
@@ -75,16 +99,88 @@ def load_questions_from_csv(filename):
                     st.warning(f"問題No.{row.get('問題No', '不明')} (CSVの{row_num}行目): 問題の解析中に予期せぬエラーが発生しました: {e}。この問題をスキップします。")
 
     except FileNotFoundError:
-        st.error(f"エラー: ファイル '{filename}' が見つかりません。'{filename}' が '{st.secrets['PWD'] if 'PWD' in st.secrets else '現在実行中のディレクトリ'}' に存在するか確認してください。")
+        # このケースは上のファイル作成処理でカバーされるが、念のため残す
+        st.error(f"エラー: ファイル '{filename}' が見つかりません。")
         return []
     except Exception as e:
         st.error(f"ファイルの読み込み中に予期せぬエラーが発生しました: {e}")
         return []
     
-    if not questions:
+    if not questions and os.path.exists(filename):
         st.warning("CSVファイルから有効な問題が読み込まれませんでした。ファイルの内容を確認してください。")
 
     return questions
+
+# --- ★★★ 新しい関数 (ここから) ★★★ ---
+
+def add_question_to_csv(new_question_data):
+    """
+    新しい問題のデータをCSVファイルに追記する関数
+    """
+    try:
+        # ファイルが存在しない場合や空の場合にヘッダーを書き込む
+        file_exists = os.path.isfile(QUESTIONS_FILE)
+        is_empty = os.path.getsize(QUESTIONS_FILE) == 0 if file_exists else True
+        
+        with open(QUESTIONS_FILE, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
+            if not file_exists or is_empty:
+                writer.writeheader()
+            writer.writerow(new_question_data)
+        
+        st.sidebar.success("問題が追加されました！")
+        # キャッシュをクリアして、次回のクイズ開始時に変更が反映されるようにする
+        st.cache_data.clear()
+
+    except Exception as e:
+        st.sidebar.error(f"問題の追加中にエラーが発生しました: {e}")
+
+
+def display_add_question_form():
+    """
+    サイドバーに問題追加フォームを表示する関数
+    """
+    st.sidebar.header("新しい問題を追加")
+
+    # clear_on_submit=True で送信後にフォームをリセット
+    with st.sidebar.form(key='add_question_form', clear_on_submit=True):
+        st.write("以下の情報を入力してください。")
+        
+        # 入力フィールド
+        q_no = st.text_input("問題No", help="例: Q001")
+        q_difficulty = st.selectbox("難易度", ["簡単", "普通", "難しい"])
+        q_text = st.text_area("問題文")
+        q_choice1 = st.text_input("選択肢1")
+        q_choice2 = st.text_input("選択肢2")
+        q_choice3 = st.text_input("選択肢3")
+        q_choice4 = st.text_input("選択肢4")
+        q_correct = st.number_input("正解の選択肢番号", min_value=1, max_value=4, step=1)
+        q_comment = st.text_area("コメント（任意）")
+
+        submitted = st.form_submit_button("この問題を追加する")
+
+        if submitted:
+            # 入力バリデーション
+            required_fields = [q_no, q_text, q_choice1, q_choice2, q_choice3, q_choice4]
+            if not all(required_fields):
+                st.sidebar.warning("必須項目（問題No, 問題文, 4つの選択肢）をすべて入力してください。")
+            else:
+                new_question = {
+                    "問題No": q_no,
+                    "難易度": q_difficulty,
+                    "問題": q_text,
+                    "選択肢1": q_choice1,
+                    "選択肢2": q_choice2,
+                    "選択肢3": q_choice3,
+                    "選択肢4": q_choice4,
+                    "正解": q_correct,
+                    "コメント": q_comment
+                }
+                add_question_to_csv(new_question)
+                # フォームがクリアされるので、ここでrerunは不要
+
+# --- ★★★ 新しい関数 (ここまで) ★★★ ---
+
 
 # --- クイズ管理関数 ---
 def start_quiz():
@@ -92,6 +188,7 @@ def start_quiz():
     st.session_state.questions = load_questions_from_csv(QUESTIONS_FILE)
     if not st.session_state.questions:
         st.session_state.quiz_started = False # 問題がないのでクイズを開始しない
+        st.warning("クイズを開始できません。問題が1問も登録されていません。")
         return
 
     random.shuffle(st.session_state.questions) # 問題をシャッフル
@@ -121,6 +218,12 @@ def display_start_screen():
     st.write("下のボタンを押してクイズを開始してください。")
     if st.button("クイズ開始"):
         start_quiz()
+    
+    # 問題が一つもない場合に案内を表示
+    # 初回起動時など、load_questions_from_csvがまだ呼ばれていない可能性を考慮
+    if not os.path.exists(QUESTIONS_FILE) or len(load_questions_from_csv(QUESTIONS_FILE)) == 0:
+        st.info("💡 サイドバーから新しい問題を追加できます。")
+
 
 def display_question():
     """現在の問題を表示し、ユーザーの回答を受け付ける"""
@@ -167,10 +270,8 @@ def display_question():
         if submitted:
             if user_choice_text is None:
                 st.warning("回答を選択してください。")
-                # st.rerun() # warningを出すだけなのでrerunは不要
             else:
                 process_answer(question_data, user_choice_text)
-                # process_answer内でst.rerun()されるため、ここでは何もしない
 
 def process_answer(question_data, user_choice_text):
     """ユーザーの回答を処理し、次の問題へ進む準備をする"""
@@ -180,7 +281,6 @@ def process_answer(question_data, user_choice_text):
     if is_correct:
         st.session_state.score += 1
 
-    # 回答詳細とフィードバック情報を保存
     st.session_state.answered_details.append({
         'question_id': question_data['id'],
         'question_text': question_data['question_text'],
@@ -191,10 +291,10 @@ def process_answer(question_data, user_choice_text):
     })
     st.session_state.last_answer_correct = is_correct
     st.session_state.last_answer_comment = question_data['comment']
-    st.session_state.show_feedback = True # 次の描画でフィードバックを表示する
+    st.session_state.show_feedback = True
 
     st.session_state.current_question_index += 1
-    st.rerun() # 画面を再描画して次の問題（または結果）へ
+    st.rerun()
 
 def display_results():
     """クイズの結果を表示する"""
@@ -230,13 +330,16 @@ def display_results():
                 
     st.markdown("---")
     if st.button("もう一度クイズを始める"):
-        reset_quiz_state() # 全ての状態をリセット
-        st.rerun() # アプリをリフレッシュしてスタート画面へ
+        reset_quiz_state()
+        st.rerun()
 
 # --- メイン関数 ---
 def main():
-    st.set_page_config(page_title="4択クイズアプリ", layout="centered")
+    st.set_page_config(page_title="4択クイズアプリ", layout="centered", initial_sidebar_state="expanded")
     st.title("💡 4択クイズアプリ")
+
+    # サイドバーに問題追加フォームを常に表示
+    display_add_question_form()
 
     if not st.session_state.quiz_started:
         display_start_screen()
