@@ -149,7 +149,7 @@ def display_add_question_form():
         st.write("以下の情報を入力してください。")
         
         q_no = st.text_input("問題No", help="例: Q001")
-        q_difficulty = st.selectbox("難易度", ["簡単", "普通", "難しい"])
+        q_difficulty = st.selectbox("難易度", ["SS", "S", "A","B","C"])
         q_text = st.text_area("問題文")
         q_choice1 = st.text_input("選択肢1")
         q_choice2 = st.text_input("選択肢2")
