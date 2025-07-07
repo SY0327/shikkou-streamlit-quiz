@@ -6,7 +6,6 @@ import os
 # --- 定数 ---
 QUESTIONS_FILE = 'questions.csv'
 # CSVのヘッダーを定数として定義
-### 変更 ###: 「ステータス」列を追加
 CSV_HEADERS = ["問題No", "難易度", "問題", "選択肢1", "選択肢2", "選択肢3", "選択肢4", "正解", "コメント", "ステータス"]
 
 
@@ -63,7 +62,7 @@ def load_questions_from_csv(filename):
                 return []
 
             for row_num, row in enumerate(reader, 2): # 2行目からカウント開始
-                ### 変更 ###: ステータスが「無効」の問題をスキップする
+                # ステータスが「無効」の問題をスキップする
                 # .get()を使い、ステータス列がない場合や空の場合は「有効」と見なす
                 if row.get('ステータス', '有効').strip() == '無効':
                     continue # この問題は警告なしでスキップ
@@ -158,7 +157,6 @@ def display_add_question_form():
         q_correct = st.number_input("正解の選択肢番号", min_value=1, max_value=4, step=1)
         q_comment = st.text_area("コメント（任意）")
         
-        ### 追加 ###: ステータス選択のUIを追加
         q_status = st.selectbox("ステータス", ["有効", "無効"], help="「無効」に設定した問題はクイズに出題されません。")
 
         submitted = st.form_submit_button("この問題を追加する")
@@ -178,21 +176,30 @@ def display_add_question_form():
                     "選択肢4": q_choice4,
                     "正解": q_correct,
                     "コメント": q_comment,
-                    "ステータス": q_status ### 追加 ###: フォームの値を辞書に追加
+                    "ステータス": q_status
                 }
                 add_question_to_csv(new_question)
 
 
-# --- クイズ管理関数 (変更なし) ---
-def start_quiz():
-    """クイズを開始・リセットする関数"""
-    st.session_state.questions = load_questions_from_csv(QUESTIONS_FILE)
-    if not st.session_state.questions:
-        st.session_state.quiz_started = False 
-        st.warning("クイズを開始できません。有効な問題が1問も登録されていません。")
+# --- クイズ管理関数 ---
+### 変更 ###: 引数を受け取り、渡された問題リストでクイズを開始するように変更
+def start_quiz(available_questions, num_questions_to_ask):
+    """
+    選択された設定に基づいてクイズを開始・リセットする関数。
+    引数として、出題候補の問題リストと出題数を受け取ります。
+    """
+    if not available_questions:
+        st.session_state.quiz_started = False
+        st.warning("クイズを開始できません。条件に合う有効な問題が見つかりません。")
         return
 
-    random.shuffle(st.session_state.questions)
+    # 問題をシャッフル
+    random.shuffle(available_questions)
+    
+    # 指定された数の問題を選択
+    st.session_state.questions = available_questions[:num_questions_to_ask]
+
+    # セッション状態を初期化
     st.session_state.current_question_index = 0
     st.session_state.score = 0
     st.session_state.answered_details = []
@@ -213,15 +220,63 @@ def reset_quiz_state():
     st.session_state.last_answer_comment = ""
     st.session_state.show_feedback = False
 
-# --- UI表示関数 (変更なし) ---
+# --- UI表示関数 ---
+### 変更 ###: クイズの設定（難易度、問題数）UIを追加
 def display_start_screen():
-    """クイズの開始画面を表示する"""
-    st.write("下のボタンを押してクイズを開始してください。")
-    if st.button("クイズ開始"):
-        start_quiz()
+    """クイズの開始画面を表示し、設定を受け付ける"""
+    st.header("クイズ設定")
     
-    if not os.path.exists(QUESTIONS_FILE) or len(load_questions_from_csv(QUESTIONS_FILE)) == 0:
+    # 問題を一度読み込み、利用可能な難易度と問題数を取得
+    all_questions = load_questions_from_csv(QUESTIONS_FILE)
+    
+    if not all_questions:
+        st.warning("クイズを開始できません。有効な問題が1問も登録されていません。")
         st.info("💡 サイドバーから新しい問題を追加できます。")
+        return
+
+    # 利用可能な難易度のリストを作成 (重複を除きソート)
+    available_difficulties = sorted(list(set(q['difficulty'] for q in all_questions)))
+
+    # --- 設定フォーム ---
+    with st.form(key='quiz_settings_form'):
+        st.write("挑戦するクイズの条件を設定してください。")
+        
+        # 難易度選択
+        selected_difficulties = st.multiselect(
+            label="難易度（複数選択可）",
+            options=available_difficulties,
+            default=available_difficulties, # デフォルトで全て選択
+        )
+
+        # 選択された難易度で問題をフィルタリング
+        if not selected_difficulties:
+            # ユーザーが意図的にクリアした場合、全難易度を対象とする
+            filtered_questions = all_questions
+        else:
+            filtered_questions = [q for q in all_questions if q['difficulty'] in selected_difficulties]
+
+        # 出題数選択
+        max_questions = len(filtered_questions)
+        
+        if max_questions > 0:
+            num_questions = st.slider(
+                label="出題数",
+                min_value=1,
+                max_value=max_questions,
+                value=min(10, max_questions), # デフォルトは10問 or 最大数
+                step=1
+            )
+            st.info(f"選択中の難易度では、最大 {max_questions} 問出題できます。")
+        else:
+            num_questions = 0
+            st.warning("選択された難易度の問題がありません。別の難易度を選んでください。")
+
+        # フォームの送信ボタン
+        submitted = st.form_submit_button("クイズ開始！", type="primary", disabled=(max_questions == 0))
+
+        if submitted:
+            # start_quizにフィルタリング済みの問題リストと出題数を渡す
+            start_quiz(filtered_questions, num_questions)
 
 
 def display_question():
@@ -337,8 +392,10 @@ def main():
     display_add_question_form()
 
     if not st.session_state.quiz_started:
+        # クイズ開始前は設定画面を表示
         display_start_screen()
     else:
+        # クイズ開始後は問題を表示
         display_question()
 
 # --- アプリケーションのエントリーポイント ---
