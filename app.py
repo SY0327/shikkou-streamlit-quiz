@@ -101,7 +101,7 @@ def display_add_question_form():
             num_existing_questions = 0
         
         question_no = st.text_input("問題No", value=str(num_existing_questions + 1))
-        difficulty = st.selectbox("難易度", options=["易", "中", "難"])
+        difficulty = st.selectbox("難易度", options=["SS", "S", "A", "B", "C", "D"])
         question_text = st.text_area("問題文", height=100)
         choice1 = st.text_input("選択肢1")
         choice2 = st.text_input("選択肢2")
