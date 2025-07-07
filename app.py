@@ -331,7 +331,7 @@ def display_results():
 # --- メイン関数 ---
 def main():
     st.set_page_config(page_title="4択クイズアプリ", layout="centered", initial_sidebar_state="expanded")
-    st.title("💡 4択クイズアプリ")
+    st.title("4択クイズ‼️")
 
     # サイドバーに問題追加フォームを常に表示
     display_add_question_form()
